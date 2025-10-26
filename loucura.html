@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Editor de Mapas SVG — Inserir e Visualizar</title>
+  <style>
+    :root{ --bg:#0f1724; --card:#0b1220; --accent:#0ea5a4; --muted:#94a3b8 }
+    body{font-family:Inter,Segoe UI,Roboto,Arial; margin:0; min-height:100vh; background:linear-gradient(180deg,#071028 0%, #071b2a 100%); color:#e6eef6; display:flex; align-items:center; justify-content:center; padding:24px}
+    .app{width:100%; max-width:1100px}
+
+    header{display:flex; align-items:center; justify-content:space-between; gap:12px}
+    h1{font-size:18px; margin:0}
+    p.lead{margin:0; font-size:13px; color:var(--muted)}
+
+    .controls{display:flex; gap:12px; margin:18px 0; align-items:center}
+    .btn{background:var(--accent); color:#042026; border:0; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:600}
+    .input-file{display:none}
+
+    /* Caixa de visualização */
+    .viewer-wrap{border-radius:10px; padding:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.04)}
+    .viewer{height:560px; border-radius:8px; background:#071826; display:flex; align-items:center; justify-content:center; overflow:auto; position:relative}
+    .viewer .placeholder{color:var(--muted); text-align:center}
+
+    .meta{margin-top:10px; font-size:13px; color:var(--muted); display:flex; gap:12px; align-items:center}
+    .dropzone{flex:1; border:2px dashed rgba(255,255,255,0.04); border-radius:8px; padding:18px; display:flex; align-items:center; justify-content:center; gap:12px; cursor:pointer}
+
+    /* Responsivo */
+    @media (max-width:700px){ .viewer{height:360px} }
+
+    /* Pequenos detalhes */
+    .info-pill{background:rgba(255,255,255,0.03); padding:6px 8px; border-radius:999px}
+    .filename{max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>Editor de Mapas SVG — Inserir & Visualizar</h1>
+        <p class="lead">Selecione um arquivo .svg para carregar e visualizá-lo inline, dentro da caixa abaixo.</p>
+      </div>
+      <div class="info-pill">Versão inicial</div>
+    </header>
+
+    <div class="controls">
+      <!-- Botão tradicional que abre o seletor de arquivo -->
+      <label class="btn" for="file-input">Inserir arquivo .svg</label>
+      <input id="file-input" class="input-file" type="file" accept=".svg,image/svg+xml" />
+
+      <!-- Área que também funciona como dropzone -->
+      <div id="dropzone" class="dropzone" title="Arraste um arquivo .svg para cá ou clique em Inserir arquivo">
+        Arraste e solte um .svg aqui, ou clique em "Inserir arquivo"
+      </div>
+
+      <div style="margin-left:auto; display:flex; gap:8px; align-items:center">
+        <div class="meta">Arquivo: <span id="filename" class="filename" style="margin-left:6px">— nenhum —</span></div>
+      </div>
+    </div>
+
+    <div class="viewer-wrap">
+      <div id="viewer" class="viewer">
+        <div class="placeholder">
+          <div style="font-size:14px; font-weight:600; margin-bottom:6px">Nenhum SVG carregado</div>
+          <div style="font-size:13px">Use o botão "Inserir arquivo .svg" ou arraste um arquivo para a área acima.</div>
+        </div>
+      </div>
+    </div>
+
+    <footer style="margin-top:10px; color:var(--muted); font-size:13px">Dica: ao carregar o SVG ele será inserido inline (como DOM). Isso permitirá edição direta dos elementos SVG mais adiante.</footer>
+  </div>
+
+  <script>
+    // Elementos
+    const fileInput = document.getElementById('file-input');
+    const dropzone = document.getElementById('dropzone');
+    const viewer = document.getElementById('viewer');
+    const filenameEl = document.getElementById('filename');
+
+    // Função que recebe o conteúdo do SVG e o exibe inline dentro de #viewer
+    function showSVG(svgText, name) {
+      // Limpa viewer
+      viewer.innerHTML = '';
+
+      // Tenta criar um elemento SVG a partir do texto — mantendo inline para permitir edição DOM futura
+      try {
+        // Opcional: remover qualquer <script> contido no SVG por segurança simples
+        const cleaned = svgText.replace(/<script[\s\S]*?<\/script>/gi, '');
+
+        // Cria wrapper e injeta
+        const wrapper = document.createElement('div');
+        wrapper.style.minWidth = '100%';
+        wrapper.style.display = 'flex';
+        wrapper.style.alignItems = 'start';
+        wrapper.style.justifyContent = 'center';
+        wrapper.style.padding = '12px';
+
+        wrapper.innerHTML = cleaned;
+
+        // Se o conteúdo não contiver um <svg>, exibe mensagem de erro
+        if (!wrapper.querySelector('svg')) {
+          viewer.innerHTML = `<div class="placeholder">Arquivo carregado não contém &lt;svg&gt; válido.</div>`;
+          filenameEl.textContent = name || '— inválido —';
+          return;
+        }
+
+        // Permite edição futura: adiciona atributo contenteditable ao elemento SVG para edição rápida (opcional)
+        const svgEl = wrapper.querySelector('svg');
+        svgEl.setAttribute('data-loaded-by', 'editor-svg');
+        // Não ativar contentEditable por padrão (isso altera comportamento de seleção); habilite quando necessário
+        // svgEl.setAttribute('contenteditable', 'true');
+
+        // Ajustes visuais básicos: torna responsivo dentro do container
+        svgEl.style.maxWidth = '100%';
+        svgEl.style.height = 'auto';
+
+        viewer.appendChild(wrapper);
+        filenameEl.textContent = name || '— sem nome —';
+
+      } catch (err) {
+        console.error('Erro ao exibir SVG:', err);
+        viewer.innerHTML = `<div class="placeholder">Erro ao processar o arquivo SVG.</div>`;
+        filenameEl.textContent = name || '— erro —';
+      }
+    }
+
+    // Ler arquivo File e processar
+    function handleFile(file) {
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith('.svg') && file.type !== 'image/svg+xml') {
+        alert('Por favor selecione um arquivo com extensão .svg');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const text = ev.target.result;
+        showSVG(text, file.name);
+      };
+      reader.onerror = () => {
+        alert('Erro ao ler o arquivo. Tente novamente.');
+      };
+      reader.readAsText(file);
+    }
+
+    // Eventos do input
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      handleFile(file);
+      // reset para permitir recarregar mesmo o mesmo arquivo
+      fileInput.value = '';
+    });
+
+    // Drag & drop
+    ;['dragenter','dragover'].forEach(evt => {
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.style.borderColor = '#38bdf8';
+      });
+    });
+    ;['dragleave','drop'].forEach(evt => {
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.style.borderColor = 'rgba(255,255,255,0.04)';
+      });
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      const file = dt.files[0];
+      handleFile(file);
+    });
+
+    // Permite clicar na dropzone para abrir o seletor de arquivos
+    dropzone.addEventListener('click', () => fileInput.click());
+
+    // Pequena melhoria: colar SVG (texto) diretamente na área do viewer
+    window.addEventListener('paste', (e) => {
+      const text = (e.clipboardData || window.clipboardData).getData('text');
+      if (text && text.trim().startsWith('<svg')) {
+        showSVG(text, 'SVG colado');
+      }
+    });
+  </script>
+</body>
+</html>
