@@ -44,6 +44,10 @@
     </header>
 
     <div class="controls">
+      <!-- Botão CSV -->
+      <label class="btn" for="csv-input">Inserir arquivo .csv</label>
+      <input id="csv-input" class="input-file" type="file" accept=".csv" />
+
       <!-- Botão tradicional que abre o seletor de arquivo -->
       <label class="btn" for="file-input">Inserir arquivo .svg</label>
       <input id="file-input" class="input-file" type="file" accept=".svg,image/svg+xml" />
@@ -67,11 +71,19 @@
       </div>
     </div>
 
+    <div class="meta" style="margin-top:16px; font-size:13px; color:var(--muted)">CSV: <span id="csvname" class="filename">— nenhum —</span></div>
+
+    <!-- Área de visualização do CSV -->
+    <div id="csv-viewer" style="margin-top:10px; background:rgba(255,255,255,0.05); padding:10px; border-radius:8px; max-height:250px; overflow:auto; font-size:13px; display:none"></div>
+
     <footer style="margin-top:10px; color:var(--muted); font-size:13px">Dica: ao carregar o SVG ele será inserido inline (como DOM). Isso permitirá edição direta dos elementos SVG mais adiante.</footer>
   </div>
 
   <script>
     // Elementos
+    const csvInput = document.getElementById('csv-input');
+    const csvNameEl = document.getElementById('csvname');
+    let csvData = null;
     const fileInput = document.getElementById('file-input');
     const dropzone = document.getElementById('dropzone');
     const viewer = document.getElementById('viewer');
@@ -79,44 +91,27 @@
 
     // Função que recebe o conteúdo do SVG e o exibe inline dentro de #viewer
     function showSVG(svgText, name) {
-      // Limpa viewer
       viewer.innerHTML = '';
-
-      // Tenta criar um elemento SVG a partir do texto — mantendo inline para permitir edição DOM futura
       try {
-        // Opcional: remover qualquer <script> contido no SVG por segurança simples
         const cleaned = svgText.replace(/<script[\s\S]*?<\/script>/gi, '');
-
-        // Cria wrapper e injeta
         const wrapper = document.createElement('div');
         wrapper.style.minWidth = '100%';
         wrapper.style.display = 'flex';
         wrapper.style.alignItems = 'start';
         wrapper.style.justifyContent = 'center';
         wrapper.style.padding = '12px';
-
         wrapper.innerHTML = cleaned;
-
-        // Se o conteúdo não contiver um <svg>, exibe mensagem de erro
         if (!wrapper.querySelector('svg')) {
           viewer.innerHTML = `<div class="placeholder">Arquivo carregado não contém &lt;svg&gt; válido.</div>`;
           filenameEl.textContent = name || '— inválido —';
           return;
         }
-
-        // Permite edição futura: adiciona atributo contenteditable ao elemento SVG para edição rápida (opcional)
         const svgEl = wrapper.querySelector('svg');
         svgEl.setAttribute('data-loaded-by', 'editor-svg');
-        // Não ativar contentEditable por padrão (isso altera comportamento de seleção); habilite quando necessário
-        // svgEl.setAttribute('contenteditable', 'true');
-
-        // Ajustes visuais básicos: torna responsivo dentro do container
         svgEl.style.maxWidth = '100%';
         svgEl.style.height = 'auto';
-
         viewer.appendChild(wrapper);
         filenameEl.textContent = name || '— sem nome —';
-
       } catch (err) {
         console.error('Erro ao exibir SVG:', err);
         viewer.innerHTML = `<div class="placeholder">Erro ao processar o arquivo SVG.</div>`;
@@ -124,42 +119,67 @@
       }
     }
 
-    // Ler arquivo File e processar
     function handleFile(file) {
       if (!file) return;
       if (!file.name.toLowerCase().endsWith('.svg') && file.type !== 'image/svg+xml') {
         alert('Por favor selecione um arquivo com extensão .svg');
         return;
       }
-
       const reader = new FileReader();
       reader.onload = (ev) => {
         const text = ev.target.result;
         showSVG(text, file.name);
       };
-      reader.onerror = () => {
-        alert('Erro ao ler o arquivo. Tente novamente.');
-      };
+      reader.onerror = () => alert('Erro ao ler o arquivo. Tente novamente.');
       reader.readAsText(file);
     }
 
-    // Eventos do input
+    function renderCSV(text) {
+      const csvViewer = document.getElementById('csv-viewer');
+      if (!text) return;
+      const rows = text.split(/\r?\n/).filter(r => r.trim() !== ''); // corrected regex
+      let html = '<table style="width:100%; border-collapse:collapse">';
+      rows.forEach((row) => {
+        const cols = row.split(',');
+        html += '<tr>' + cols.map(c => `<td style=\"border:1px solid #334; padding:4px;\">${c}</td>`).join('') + '</tr>';
+      });
+      html += '</table>';
+      csvViewer.innerHTML = html;
+      csvViewer.style.display = 'block';
+    }
+
+    csvInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith('.csv')) {
+        alert('Por favor selecione um arquivo com extensão .csv');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        csvData = ev.target.result;
+        csvNameEl.textContent = file.name || '— sem nome —';
+        renderCSV(csvData);
+      };
+      reader.onerror = () => alert('Erro ao ler o CSV.');
+      reader.readAsText(file);
+      csvInput.value = '';
+    });
+
     fileInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
       handleFile(file);
-      // reset para permitir recarregar mesmo o mesmo arquivo
       fileInput.value = '';
     });
 
-    // Drag & drop
-    ;['dragenter','dragover'].forEach(evt => {
+    ['dragenter','dragover'].forEach(evt => {
       dropzone.addEventListener(evt, (e) => {
         e.preventDefault();
         e.stopPropagation();
         dropzone.style.borderColor = '#38bdf8';
       });
     });
-    ;['dragleave','drop'].forEach(evt => {
+    ['dragleave','drop'].forEach(evt => {
       dropzone.addEventListener(evt, (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -174,10 +194,8 @@
       handleFile(file);
     });
 
-    // Permite clicar na dropzone para abrir o seletor de arquivos
     dropzone.addEventListener('click', () => fileInput.click());
 
-    // Pequena melhoria: colar SVG (texto) diretamente na área do viewer
     window.addEventListener('paste', (e) => {
       const text = (e.clipboardData || window.clipboardData).getData('text');
       if (text && text.trim().startsWith('<svg')) {
@@ -187,3 +205,4 @@
   </script>
 </body>
 </html>
+
