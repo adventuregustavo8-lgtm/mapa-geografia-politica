@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Cores da Geoeleição</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat&family=Quantico&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Montserrat', sans-serif;
+      margin: 0;
+      padding: 2rem;
+      background: linear-gradient(120deg, #0d0d42, #374597, #1e466b);
+      color: #ffffff;
+      text-align: center;
+    }
+    h1 {
+      font-family: 'Quantico', sans-serif;
+      font-size: 2.5rem;
+      color: #e0d4ff;
+      margin-bottom: 2rem;
+    }
+    h2 {
+      font-family: 'Montserrat', sans-serif;
+      color: #e0d4ff;
+      margin-bottom: 1rem;
+    }
+    p {
+      margin: 0.5rem 0 1rem;
+    }
+    input[type=file], button {
+      margin: 1rem 0;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      border: none;
+      font-size: 1rem;
+    }
+    button {
+      background-color: #6a4fc7;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    button:hover {
+      background-color: #5a3db1;
+    }
+    a {
+      color: #ffdbfa;
+      font-weight: bold;
+      display: inline-block;
+      margin-top: 1rem;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    hr {
+      border: none;
+      height: 2px;
+      background: #a177ff;
+      margin: 2rem auto;
+      width: 80%;
+    }
+    img {
+      max-width: 80px;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    #originalSvgPreview, #editedSvgPreview, #extractedSvgPreview {
+      margin: 2rem auto;
+      background: #fff;
+      border-radius: 25px;
+      padding-top: 0.2rem;
+      padding-bottom: 0.8rem;
+      width: 45%;
+      max-width: 1200px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Cores da Geopolítica</h1>
+  <h2>Editor de Mapa Político (.svg)</h2>
+  <p>Etapa I - Faça o upload de um arquivo <strong>.svg</strong> com mapa vetorial:</p>
+  <input type="file" id="svgFile" accept=".svg" onchange="previewOriginalSvg()">
+
+  <div id="originalSvgPreview"></div>
+
+  <p>Etapa II - Faça o upload de um arquivo <strong>.csv</strong> com colunas: <code>cod_mun,nome_mun,cor</code>:</p>
+  <input type="file" id="csvFile" accept=".csv">
+
+  <br>
+  <button onclick="processFiles()">Gerar novo SVG</button>
+  <br>
+  <a id="downloadLink" style="display:none;" download="mapa_editado.svg">Baixar Mapa Editado</a>
+
+  <div id="editedSvgPreview"></div>
+
+  <hr>
+
+  <h2>Extrair planilha a partir de um Mapa Político (.svg)</h2>
+  <p>Envie um mapa político em formato <strong>.svg</strong> para gerar uma planilha em formato <strong>.csv</strong>:</p>
+  <input type="file" id="extractFile" accept=".svg" onchange="previewExtractedSvg()">
+  <br>
+  <button onclick="extractData()">Extrair para CSV</button>
+  <br>
+  <a id="csvDownloadLink" style="display:none;" download="municipios_extraidos.csv">Baixar CSV Gerado</a>
+
+  <div id="extractedSvgPreview"></div>
+
+  <a href="loucura.html">
+    <img src="https://cdn-icons-png.freepik.com/256/16431/16431303.png?semt=ais_hybrid" alt="Mapa do Brasil">
+  </a>
+
+  <a href="loucura2.html">
+    <img src="https://cdn-icons-png.freepik.com/256/16431/16431303.png?semt=ais_hybrid" alt="Mapa do Brasil">
+  </a>
+
+  <script>
+    async function previewOriginalSvg() {
+      const fileInput = document.getElementById('svgFile').files[0];
+      if (!fileInput) return;
+      const svgText = await fileInput.text();
+      const container = document.getElementById('originalSvgPreview');
+      container.innerHTML = '<h2>Mapa Original</h2>' + svgText;
+    }
+
+    async function previewExtractedSvg() {
+      const fileInput = document.getElementById('extractFile').files[0];
+      if (!fileInput) return;
+      const svgText = await fileInput.text();
+      const container = document.getElementById('extractedSvgPreview');
+      container.innerHTML = '<h2>Visualização do Mapa Importado</h2>' + svgText;
+    }
+
+    async function processFiles() {
+      const svgInput = document.getElementById('svgFile').files[0];
+      const csvInput = document.getElementById('csvFile').files[0];
+
+      if (!svgInput || !csvInput) {
+        alert("Por favor, envie os dois arquivos.");
+        return;
+      }
+
+      const svgText = await svgInput.text();
+      const csvText = await csvInput.text();
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(svgText, "image/svg+xml");
+
+      const lines = csvText.split(/\r?\n/);
+      const map = {};
+      for (let i = 1; i < lines.length; i++) {
+        const [cod_mun, nome_mun, nome_mun2, cor] = lines[i].split(',');
+        if (cod_mun && cor) map[cod_mun.trim()] = cor.trim();
+      }
+
+      const elements = xmlDoc.querySelectorAll("[id]");
+      elements.forEach(el => {
+        const id = el.getAttribute("id");
+        if (map[id]) {
+          let style = el.getAttribute("style") || "";
+          let styles = Object.fromEntries(style.split(';').map(s => s.split(':')).filter(p => p.length === 2));
+          styles.fill = map[id];
+          el.setAttribute("style", Object.entries(styles).map(([k, v]) => `${k}:${v}`).join(';'));
+        }
+      });
+
+      const serializer = new XMLSerializer();
+      const editedSvg = serializer.serializeToString(xmlDoc);
+      const blob = new Blob([editedSvg], { type: "image/svg+xml" });
+      const url = URL.createObjectURL(blob);
+
+      const link = document.getElementById("downloadLink");
+      link.href = url;
+      link.style.display = "inline-block";
+      link.textContent = "Baixar Mapa Editado";
+
+      const container = document.getElementById('editedSvgPreview');
+      container.innerHTML = '<h2>Mapa Editado</h2>' + editedSvg;
+    }
+
+    async function extractData() {
+      const fileInput = document.getElementById("extractFile").files[0];
+      if (!fileInput) {
+        alert("Envie um arquivo SVG primeiro.");
+        return;
+      }
+
+      const svgText = await fileInput.text();
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(svgText, "image/svg+xml");
+
+      const rows = [["cod_mun", "nome_mun", "nome_mun2", "cor"]];
+      const elements = xmlDoc.querySelectorAll("[id]");
+      elements.forEach(el => {
+        const id = el.getAttribute("id") || "";
+
+        let label = el.getAttribute("label") || "";
+        if (!label) {
+          for (let attr of el.attributes) {
+            if (attr.name.endsWith(":label")) {
+              label = attr.value;
+              break;
+            }
+          }
+        }
+
+        const nome_mun2 = ""; // coluna auxiliar vazia
+
+        let fill = "";
+        const styleAttr = el.getAttribute("style");
+        if (styleAttr) {
+          const styleParts = styleAttr.split(';');
+          for (let part of styleParts) {
+            const [prop, val] = part.split(':').map(p => p.trim());
+            if (prop === 'fill') {
+              fill = val;
+              break;
+            }
+          }
+        }
+
+        rows.push([id, label, fill]);
+      });
+
+      const csvContent = rows.map(row => row.join(",")).join("\n");
+      const blob = new Blob([csvContent], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+
+      const link = document.getElementById("csvDownloadLink");
+      link.href = url;
+      link.style.display = "inline-block";
+      link.textContent = "Baixar CSV Gerado";
+    }
+  </script>
+</body>
+</html>
+
