@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Editor de Mapas SVG — Inserir e Visualizar</title>
+  <title>Editor de Mapas SVG — Inserir, CSV & Gerar</title>
   <style>
     :root{ --bg:#0f1724; --card:#0b1220; --accent:#0ea5a4; --muted:#94a3b8 }
     body{font-family:Inter,Segoe UI,Roboto,Arial; margin:0; min-height:100vh; background:linear-gradient(180deg,#071028 0%, #071b2a 100%); color:#e6eef6; display:flex; align-items:center; justify-content:center; padding:24px}
@@ -13,11 +13,10 @@
     h1{font-size:18px; margin:0}
     p.lead{margin:0; font-size:13px; color:var(--muted)}
 
-    .controls{display:flex; gap:12px; margin:18px 0; align-items:center}
+    .controls{display:flex; gap:12px; margin:18px 0; align-items:center; flex-wrap:wrap}
     .btn{background:var(--accent); color:#042026; border:0; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:600}
     .input-file{display:none}
 
-    /* Caixa de visualização */
     .viewer-wrap{border-radius:10px; padding:12px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.04)}
     .viewer{height:560px; border-radius:8px; background:#071826; display:flex; align-items:center; justify-content:center; overflow:auto; position:relative}
     .viewer .placeholder{color:var(--muted); text-align:center}
@@ -25,10 +24,8 @@
     .meta{margin-top:10px; font-size:13px; color:var(--muted); display:flex; gap:12px; align-items:center}
     .dropzone{flex:1; border:2px dashed rgba(255,255,255,0.04); border-radius:8px; padding:18px; display:flex; align-items:center; justify-content:center; gap:12px; cursor:pointer}
 
-    /* Responsivo */
     @media (max-width:700px){ .viewer{height:360px} }
 
-    /* Pequenos detalhes */
     .info-pill{background:rgba(255,255,255,0.03); padding:6px 8px; border-radius:999px}
     .filename{max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   </style>
@@ -37,28 +34,24 @@
   <div class="app">
     <header>
       <div>
-        <h1>Editor de Mapas SVG — Inserir & Visualizar</h1>
-        <p class="lead">Selecione um arquivo .svg para carregar e visualizá-lo inline, dentro da caixa abaixo.</p>
+        <h1>Editor de Mapas SVG — Inserir & Gerar</h1>
+        <p class="lead">Carregue um SVG e um CSV e gere o mapa editado.</p>
       </div>
       <div class="info-pill">Versão inicial</div>
     </header>
 
     <div class="controls">
-      <!-- Botão CSV -->
       <label class="btn" for="csv-input">Inserir arquivo .csv</label>
       <input id="csv-input" class="input-file" type="file" accept=".csv" />
 
-      <!-- Botão tradicional que abre o seletor de arquivo -->
       <label class="btn" for="file-input">Inserir arquivo .svg</label>
       <input id="file-input" class="input-file" type="file" accept=".svg,image/svg+xml" />
 
-      <!-- Área que também funciona como dropzone -->
-      <div id="dropzone" class="dropzone" title="Arraste um arquivo .svg para cá ou clique em Inserir arquivo">
-        Arraste e solte um .svg aqui, ou clique em "Inserir arquivo"
-      </div>
+      <button id="generate" class="btn">Gerar mapa</button>
 
       <div style="margin-left:auto; display:flex; gap:8px; align-items:center">
-        <div class="meta">Arquivo: <span id="filename" class="filename" style="margin-left:6px">— nenhum —</span></div>
+        <div class="meta">SVG: <span id="filename" class="filename">— nenhum —</span></div>
+        <div class="meta">CSV: <span id="csvname" class="filename">— nenhum —</span></div>
       </div>
     </div>
 
@@ -66,143 +59,104 @@
       <div id="viewer" class="viewer">
         <div class="placeholder">
           <div style="font-size:14px; font-weight:600; margin-bottom:6px">Nenhum SVG carregado</div>
-          <div style="font-size:13px">Use o botão "Inserir arquivo .svg" ou arraste um arquivo para a área acima.</div>
         </div>
       </div>
     </div>
 
-    <div class="meta" style="margin-top:16px; font-size:13px; color:var(--muted)">CSV: <span id="csvname" class="filename">— nenhum —</span></div>
-
-    <!-- Área de visualização do CSV -->
     <div id="csv-viewer" style="margin-top:10px; background:rgba(255,255,255,0.05); padding:10px; border-radius:8px; max-height:250px; overflow:auto; font-size:13px; display:none"></div>
 
-    <footer style="margin-top:10px; color:var(--muted); font-size:13px">Dica: ao carregar o SVG ele será inserido inline (como DOM). Isso permitirá edição direta dos elementos SVG mais adiante.</footer>
+    <div style="margin-top:12px">
+      <a id="download-link" style="display:none; color:var(--accent); font-weight:600" download="mapa_editado.svg">Download do mapa editado</a>
+    </div>
+
+    <footer style="margin-top:10px; color:var(--muted); font-size:13px">O CSV deve conter colunas: nome_mun, region, value, long-name</footer>
   </div>
 
   <script>
-    // Elementos
     const csvInput = document.getElementById('csv-input');
     const csvNameEl = document.getElementById('csvname');
     let csvData = null;
-    const fileInput = document.getElementById('file-input');
-    const dropzone = document.getElementById('dropzone');
-    const viewer = document.getElementById('viewer');
-    const filenameEl = document.getElementById('filename');
 
-    // Função que recebe o conteúdo do SVG e o exibe inline dentro de #viewer
+    const fileInput = document.getElementById('file-input');
+    const filenameEl = document.getElementById('filename');
+    const viewer = document.getElementById('viewer');
+    let svgTextGlobal = null;
+
     function showSVG(svgText, name) {
       viewer.innerHTML = '';
-      try {
-        const cleaned = svgText.replace(/<script[\s\S]*?<\/script>/gi, '');
-        const wrapper = document.createElement('div');
-        wrapper.style.minWidth = '100%';
-        wrapper.style.display = 'flex';
-        wrapper.style.alignItems = 'start';
-        wrapper.style.justifyContent = 'center';
-        wrapper.style.padding = '12px';
-        wrapper.innerHTML = cleaned;
-        if (!wrapper.querySelector('svg')) {
-          viewer.innerHTML = `<div class="placeholder">Arquivo carregado não contém &lt;svg&gt; válido.</div>`;
-          filenameEl.textContent = name || '— inválido —';
-          return;
-        }
-        const svgEl = wrapper.querySelector('svg');
-        svgEl.setAttribute('data-loaded-by', 'editor-svg');
-        svgEl.style.maxWidth = '100%';
-        svgEl.style.height = 'auto';
-        viewer.appendChild(wrapper);
-        filenameEl.textContent = name || '— sem nome —';
-      } catch (err) {
-        console.error('Erro ao exibir SVG:', err);
-        viewer.innerHTML = `<div class="placeholder">Erro ao processar o arquivo SVG.</div>`;
-        filenameEl.textContent = name || '— erro —';
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = svgText.replace(/<script[\s\S]*?<\/script>/gi, '');
+      if (!wrapper.querySelector('svg')) {
+        viewer.innerHTML = `<div class="placeholder">Arquivo não contém &lt;svg&gt; válido.</div>`;
+        filenameEl.textContent = name || '— inválido —';
+        return;
       }
+      viewer.appendChild(wrapper);
+      svgTextGlobal = wrapper.innerHTML;
+      filenameEl.textContent = name || '— sem nome —';
     }
 
-    function handleFile(file) {
+    function handleSVGFile(file) {
       if (!file) return;
       if (!file.name.toLowerCase().endsWith('.svg') && file.type !== 'image/svg+xml') {
-        alert('Por favor selecione um arquivo com extensão .svg');
+        alert('Selecione um arquivo SVG');
         return;
       }
       const reader = new FileReader();
-      reader.onload = (ev) => {
-        const text = ev.target.result;
-        showSVG(text, file.name);
-      };
-      reader.onerror = () => alert('Erro ao ler o arquivo. Tente novamente.');
+      reader.onload = (e) => showSVG(e.target.result, file.name);
       reader.readAsText(file);
     }
 
     function renderCSV(text) {
       const csvViewer = document.getElementById('csv-viewer');
       if (!text) return;
-      const rows = text.split(/\r?\n/).filter(r => r.trim() !== ''); // corrected regex
-      let html = '<table style="width:100%; border-collapse:collapse">';
-      rows.forEach((row) => {
-        const cols = row.split(',');
-        html += '<tr>' + cols.map(c => `<td style=\"border:1px solid #334; padding:4px;\">${c}</td>`).join('') + '</tr>';
+      const rows = text.split(/\r?\n/).filter(r => r.trim() !== '');
+      csvData = rows.map(r => {
+        const [nome_mun, region, value, long_name] = r.split(',');
+        return {nome_mun:nome_mun.trim(), region:region.trim(), value:value.trim(), long_name:long_name.trim()};
       });
-      html += '</table>';
-      csvViewer.innerHTML = html;
+      csvViewer.innerHTML = '<pre>' + text + '</pre>';
       csvViewer.style.display = 'block';
     }
 
-    csvInput.addEventListener('change', (e) => {
+    csvInput.addEventListener('change', e => {
       const file = e.target.files[0];
       if (!file) return;
-      if (!file.name.toLowerCase().endsWith('.csv')) {
-        alert('Por favor selecione um arquivo com extensão .csv');
-        return;
-      }
+      csvNameEl.textContent = file.name || '— sem nome —';
       const reader = new FileReader();
-      reader.onload = (ev) => {
-        csvData = ev.target.result;
-        csvNameEl.textContent = file.name || '— sem nome —';
-        renderCSV(csvData);
-      };
-      reader.onerror = () => alert('Erro ao ler o CSV.');
+      reader.onload = ev => renderCSV(ev.target.result);
       reader.readAsText(file);
       csvInput.value = '';
     });
 
-    fileInput.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      handleFile(file);
-      fileInput.value = '';
-    });
+    fileInput.addEventListener('change', e => { handleSVGFile(e.target.files[0]); fileInput.value = ''; });
 
-    ['dragenter','dragover'].forEach(evt => {
-      dropzone.addEventListener(evt, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropzone.style.borderColor = '#38bdf8';
+    document.getElementById('generate').addEventListener('click', () => {
+      if (!svgTextGlobal || !csvData) { alert('Carregue o SVG e o CSV antes de gerar.'); return; }
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(svgTextGlobal, 'image/svg+xml');
+      const paths = doc.querySelectorAll('path');
+      paths.forEach(p => {
+        const label = p.getAttribute('label') || p.getAttribute('inkscape:label');
+        const csvRow = csvData.find(r => r.nome_mun === label);
+        p.setAttribute('region','0');
+        p.setAttribute('value','0');
+        p.setAttribute('long-name','None');
+        if (csvRow) {
+          p.setAttribute('region', csvRow.region);
+          p.setAttribute('value', csvRow.value);
+          p.setAttribute('long-name', csvRow['long_name']);
+        }
       });
-    });
-    ['dragleave','drop'].forEach(evt => {
-      dropzone.addEventListener(evt, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropzone.style.borderColor = 'rgba(255,255,255,0.04)';
-      });
-    });
-
-    dropzone.addEventListener('drop', (e) => {
-      const dt = e.dataTransfer;
-      if (!dt) return;
-      const file = dt.files[0];
-      handleFile(file);
-    });
-
-    dropzone.addEventListener('click', () => fileInput.click());
-
-    window.addEventListener('paste', (e) => {
-      const text = (e.clipboardData || window.clipboardData).getData('text');
-      if (text && text.trim().startsWith('<svg')) {
-        showSVG(text, 'SVG colado');
-      }
+      const serializer = new XMLSerializer();
+      const svgStr = serializer.serializeToString(doc);
+      const blob = new Blob([svgStr], {type:'image/svg+xml'});
+      const url = URL.createObjectURL(blob);
+      const link = document.getElementById('download-link');
+      link.href = url;
+      link.style.display = 'inline';
+      link.textContent = 'Download do mapa editado';
     });
   </script>
 </body>
 </html>
-
