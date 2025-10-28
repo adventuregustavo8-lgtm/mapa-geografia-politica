@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SVG ← CSV — Map Editor</title>
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 18px; background:#fafafa; color:#111; }
+    .container { max-width:1000px; margin:0 auto; background:#fff; padding:18px; border-radius:8px; box-shadow:0 6px 20px rgba(15,15,15,0.06); }
+    h1 { margin:0 0 8px 0; font-size:20px; }
+    label { font-weight:600; display:block; margin-bottom:6px;}
+    input[type=file] { display:block; margin-bottom:12px; }
+    button { cursor:pointer; padding:8px 12px; border-radius:6px; border:0; background:#0ea5e9; color:white; margin-right:8px; }
+    button.secondary { background:#10b981; }
+    button.ghost { background:#e6e6e6; color:#111; }
+    pre { background:#111; color:#dcdcdc; padding:10px; border-radius:6px; max-height:240px; overflow:auto; font-size:12px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+    .col { flex:1 1 320px; min-width:250px; }
+    .small { font-size:13px; color:#555; margin-top:8px; }
+    .status { margin-top:10px; font-weight:600; color:#333; }
+    a.download { display:inline-block; text-decoration:none; padding:8px 12px; background:#16a34a; color:#fff; border-radius:6px; }
+    .footer { font-size:13px; color:#666; margin-top:12px; }
+    .note { background:#fff8db; border-radius:6px; padding:8px; margin-bottom:10px; border:1px solid #fff1a8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>SVG ← CSV — Map Editor (HTML)</h1>
+    <p class="small">Faça upload de um arquivo <code>.svg</code> e um <code>.csv</code> com colunas <strong>id,label,value,region</strong> (case-insensitive). O editor atualiza cada <code>&lt;path&gt;</code> adicionando <code>long-name</code>, <code>value</code> e <code>region</code>.</p>
+
+    <div class="row">
+      <div class="col">
+        <label for="svgFile">Arquivo SVG</label>
+        <input id="svgFile" type="file" accept=".svg" />
+        <div class="note">O SVG será tratado como texto. O editor altera apenas as tags &lt;path ...&gt; — preservando demais conteúdo.</div>
+      </div>
+
+      <div class="col">
+        <label for="csvFile">Arquivo CSV</label>
+        <input id="csvFile" type="file" accept=".csv,text/csv" />
+        <div class="small">CSV simples: primeira linha = cabeçalho. Ex.: <code>id,label,value,region</code></div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <button id="btnProcess">Gerar mapa editado</button>
+      <button id="btnClear" class="ghost">Limpar</button>
+      <span id="status" class="status"></span>
+    </div>
+
+    <div id="downloadArea" style="margin-bottom:12px;"></div>
+
+    <details>
+      <summary style="cursor:pointer; padding:6px 0;">Visualizar SVG (entrada) / CSV (entrada)</summary>
+      <div style="display:flex; gap:12px; margin-top:8px; flex-wrap:wrap;">
+        <div style="flex:1 1 45%;">
+          <label>SVG (preview)</label>
+          <pre id="svgPreview">Nenhum SVG carregado.</pre>
+        </div>
+        <div style="flex:1 1 45%;">
+          <label>CSV (preview)</label>
+          <pre id="csvPreview">Nenhum CSV carregado.</pre>
+        </div>
+      </div>
+    </details>
+
+    <div class="footer">
+      Dica: o CSV pode usar `id` para casar com o atributo <code>id</code> do &lt;path&gt;. Se nenhum `id` casar, o sistema tentará casar por `label` (o valor de `inkscape:label`). Os atributos serão inseridos antes de `id="..."` quando existir; caso contrário inseridos antes do fechamento da tag.
+    </div>
+  </div>
+
+  <script>
+    // Helpers
+    function readFileAsText(file) {
+      return new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => reject(fr.error);
+        fr.readAsText(file, 'utf-8');
+      });
+    }
+
+    // CSV parser (supports quotes and commas inside quotes)
+    function parseCSV(text) {
+      text = text.replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n');
+      const lines = text.split('\\n').filter(l => l.trim() !== '');
+      if (lines.length === 0) return { headers: [], rows: [] };
+      const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase());
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const values = parseCSVLine(lines[i]);
+        while (values.length < headers.length) values.push('');
+        const obj = {};
+        for (let j = 0; j < headers.length; j++) obj[headers[j]] = values[j];
+        rows.push(obj);
+      }
+      return { headers, rows };
+    }
+
+    function parseCSVLine(line) {
+      const out = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+          else inQuotes = !inQuotes;
+        } else if (ch === ',' && !inQuotes) {
+          out.push(cur);
+          cur = '';
+        } else {
+          cur += ch;
+        }
+      }
+      out.push(cur);
+      return out;
+    }
+
+    function buildLookup(rows) {
+      const byId = {}, byLabel = {};
+      rows.forEach(r => {
+        const id = (r.id || '').toString().trim();
+        const label = (r.label || '').toString().trim();
+        const value = (r.value || '0').toString().trim();
+        const region = (r.region || '0').toString().trim();
+        if (id) byId[id] = { value, region, label };
+        if (label) byLabel[label] = { value, region, id };
+      });
+      return { byId, byLabel };
+    }
+
+    function escapeAttr(s) {
+      if (s === undefined || s === null) return '';
+      return ('' + s).replace(/"/g, '&quot;');
+    }
+
+    // Main edit function
+    function editSvg(svgText, lookup) {
+      // Regex to match <path ...> tags (non-greedy)
+      const pathRegex = /<path\\b[^>]*>/gi;
+
+      const modified = svgText.replace(pathRegex, (tag) => {
+        // Remove any previously added attributes to avoid duplication
+        let clean = tag
+          .replace(/\\s+long-name="[^"]*"/gi, '')
+          .replace(/\\s+value="[^"]*"/gi, '')
+          .replace(/\\s+region="[^"]*"/gi, '');
+
+        // Extract inkscape:label (if exists)
+        const labelMatch = clean.match(/inkscape:label="([^"]*)"/i);
+        const inkscapeLabel = labelMatch ? labelMatch[1] : null;
+
+        // Extract id if present
+        const idMatch = clean.match(/\\sid="([^"]*)"/i);
+        const elemId = idMatch ? idMatch[1] : null;
+
+        // Determine final values
+        let longName = inkscapeLabel || 'None';
+        let value = '0';
+        let region = '0';
+
+        if (elemId && lookup.byId[elemId]) {
+          const rec = lookup.byId[elemId];
+          value = rec.value || '0';
+          region = rec.region || '0';
+          // prefer CSV label if present
+          if (rec.label) longName = rec.label;
+        } else if (inkscapeLabel && lookup.byLabel[inkscapeLabel]) {
+          const rec = lookup.byLabel[inkscapeLabel];
+          value = rec.value || '0';
+          region = rec.region || '0';
+          // do not overwrite id attribute in SVG
+        }
+
+        // Prepare new attributes as separate indented lines
+        const indent = '    '; // 4 spaces
+        const newlineAttrs = `\\n${indent}long-name="${escapeAttr(longName)}"\\n${indent}value="${escapeAttr(value)}"\\n${indent}region="${escapeAttr(region)}"`;
+
+        // Insert before id attribute if present
+        if (idMatch) {
+          // insert only before the first id occurrence preceded by whitespace
+          const replaced = clean.replace(/(\\s+id=")/i, `${newlineAttrs}$1`);
+          return replaced;
+        } else {
+          // No id: insert before closing > or />
+          // handle both '/>' and '>'
+          const selfClosing = clean.endsWith('/>');
+          if (selfClosing) {
+            const withoutClose = clean.slice(0, -2);
+            return withoutClose + newlineAttrs + ' />';
+          } else {
+            const withoutClose = clean.slice(0, -1);
+            return withoutClose + newlineAttrs + '>';
+          }
+        }
+      });
+
+      return modified;
+    }
+
+    // UI wiring
+    const svgFileEl = document.getElementById('svgFile');
+    const csvFileEl = document.getElementById('csvFile');
+    const btnProcess = document.getElementById('btnProcess');
+    const btnClear = document.getElementById('btnClear');
+    const statusEl = document.getElementById('status');
+    const svgPreview = document.getElementById('svgPreview');
+    const csvPreview = document.getElementById('csvPreview');
+    const downloadArea = document.getElementById('downloadArea');
+
+    let lastBlobUrl = null;
+
+    btnProcess.addEventListener('click', async () => {
+      downloadArea.innerHTML = '';
+      statusEl.textContent = '';
+
+      if (!svgFileEl.files[0]) { statusEl.textContent = 'Selecione o SVG.'; return; }
+      if (!csvFileEl.files[0]) { statusEl.textContent = 'Selecione o CSV.'; return; }
+
+      try {
+        statusEl.textContent = 'Lendo arquivos...';
+        const [svgText, csvText] = await Promise.all([readFileAsText(svgFileEl.files[0]), readFileAsText(csvFileEl.files[0])]);
+
+        svgPreview.textContent = svgText.slice(0, 20000);
+        csvPreview.textContent = csvText.slice(0, 20000);
+
+        statusEl.textContent = 'Parseando CSV...';
+        const csvData = parseCSV(csvText);
+        const lookup = buildLookup(csvData.rows);
+
+        statusEl.textContent = 'Editando SVG...';
+        const edited = editSvg(svgText, lookup);
+
+        // Offer download
+        const blob = new Blob([edited], { type: 'image/svg+xml;charset=utf-8' });
+        if (lastBlobUrl) URL.revokeObjectURL(lastBlobUrl);
+        lastBlobUrl = URL.createObjectURL(blob);
+
+        const link = document.createElement('a');
+        link.href = lastBlobUrl;
+        link.className = 'download';
+        link.download = (svgFileEl.files[0] && svgFileEl.files[0].name) ? svgFileEl.files[0].name.replace(/\\.svg$/i, '') + '_editado.svg' : 'mapa_editado.svg';
+        link.textContent = 'Baixar mapa editado';
+        downloadArea.appendChild(link);
+
+        // Also show quick report: how many paths modified
+        const totalPaths = (edited.match(/<path\\b/gi) || []).length;
+        statusEl.textContent = `Pronto — mapa editado gerado. Paths encontradas: ${totalPaths}`;
+
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = 'Erro: ' + (err && err.message ? err.message : err);
+      }
+    });
+
+    btnClear.addEventListener('click', () => {
+      svgFileEl.value = null;
+      csvFileEl.value = null;
+      svgPreview.textContent = 'Nenhum SVG carregado.';
+      csvPreview.textContent = 'Nenhum CSV carregado.';
+      statusEl.textContent = '';
+      downloadArea.innerHTML = '';
+      if (lastBlobUrl) { URL.revokeObjectURL(lastBlobUrl); lastBlobUrl = null; }
+    });
+
+    // Optional: show previews when user selects files
+    svgFileEl.addEventListener('change', async () => {
+      if (!svgFileEl.files[0]) { svgPreview.textContent = 'Nenhum SVG carregado.'; return; }
+      svgPreview.textContent = await readFileAsText(svgFileEl.files[0]).then(s => s.slice(0,20000)).catch(()=> 'Erro ao ler SVG');
+    });
+
+    csvFileEl.addEventListener('change', async () => {
+      if (!csvFileEl.files[0]) { csvPreview.textContent = 'Nenhum CSV carregado.'; return; }
+      csvPreview.textContent = await readFileAsText(csvFileEl.files[0]).then(s => s.slice(0,20000)).catch(()=> 'Erro ao ler CSV');
+    });
+  </script>
+</body>
+</html>
